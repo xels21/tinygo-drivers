@@ -32,10 +32,36 @@ func (d Device) WriteByte(c byte) error {
 		// Some documentation:
 		// http://cholla.mmto.org/esp8266/xtensa.html
 		// https://0x04.net/~mwk/doc/xtensa.pdf
+
+		//Notes from Xels [11.12.2023]
+		// T0H 350ns (+-150ns)
+		// T0L 900ns (+-150ns)
+		// T1H 900ns (+-150ns)
+		// T1L 350ns (+-150ns)
+		// 160MHz would be 6.25ns per instruction
+		//  350ns -> 56  cycles //  (0)1+53+1+1
+		//  900ns -> 144 cycles // (56)+1+87
+
 		device.AsmFull(`
 		1: // send_bit
 			s32i  {maskSet}, {portSet}, 0     // [1]  T0H and T1H start here
-			nop                               // [37]
+			nop                               // [53]
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
 			nop
 			nop
 			nop
@@ -76,7 +102,39 @@ func (d Device) WriteByte(c byte) error {
 			bbsi  {value}, 8, 2f              // [1]  branch to skip_store if bit 8 is set
 			s32i  {maskClear}, {portClear}, 0 // [1]  T0H -> T0L transition
 		2: // skip_store
-			nop                               // [55]
+			nop                               // [87]
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
+			nop
 			nop
 			nop
 			nop
@@ -132,26 +190,7 @@ func (d Device) WriteByte(c byte) error {
 			nop
 			nop
 			s32i  {maskClear}, {portClear}, 0 // [1]  T1H -> T1L transition
-			nop                               // [72]
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
-			nop
+			nop                               // [53]
 			nop
 			nop
 			nop
