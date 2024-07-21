@@ -11,7 +11,16 @@ import (
 
 	"tinygo.org/x/drivers"
 	"tinygo.org/x/drivers/internal/legacy"
+	"tinygo.org/x/drivers/pixel"
 )
+
+var (
+	errBufferSize     = errors.New("invalid size buffer")
+	errOutOfRange     = errors.New("out of screen range")
+	errNotImplemented = errors.New("not implemented")
+)
+
+type ResetValue [2]byte
 
 // Device wraps I2C or SPI connection.
 type Device struct {
@@ -22,6 +31,8 @@ type Device struct {
 	bufferSize int16
 	vccState   VccMode
 	canReset   bool
+	resetCol   ResetValue
+	resetPage  ResetValue
 }
 
 // Config is the configuration for the display
@@ -30,6 +41,13 @@ type Config struct {
 	Height   int16
 	VccState VccMode
 	Address  uint16
+	// ResetCol and ResetPage are used to reset the screen to 0x0
+	// This is useful for some screens that have a different size than 128x64
+	// For example, the Thumby's screen is 72x40
+	// The default values are normally set automatically based on the size.
+	// If you're using a different size, you might need to set these values manually.
+	ResetCol  ResetValue
+	ResetPage ResetValue
 }
 
 type I2CBus struct {
@@ -79,6 +97,7 @@ func NewSPI(bus drivers.SPI, dcPin, resetPin, csPin machine.Pin) Device {
 
 // Configure initializes the display with default configuration
 func (d *Device) Configure(cfg Config) {
+	var zeroReset ResetValue
 	if cfg.Width != 0 {
 		d.width = cfg.Width
 	} else {
@@ -96,6 +115,16 @@ func (d *Device) Configure(cfg Config) {
 		d.vccState = cfg.VccState
 	} else {
 		d.vccState = SWITCHCAPVCC
+	}
+	if cfg.ResetCol != zeroReset {
+		d.resetCol = cfg.ResetCol
+	} else {
+		d.resetCol = ResetValue{0, uint8(d.width - 1)}
+	}
+	if cfg.ResetPage != zeroReset {
+		d.resetPage = cfg.ResetPage
+	} else {
+		d.resetPage = ResetValue{0, uint8(d.height/8) - 1}
 	}
 	d.bufferSize = d.width * d.height / 8
 	d.buffer = make([]byte, d.bufferSize)
@@ -186,11 +215,11 @@ func (d *Device) Display() error {
 	// Since we're printing the whole buffer, avoid resetting it in this case
 	if d.canReset {
 		d.Command(COLUMNADDR)
-		d.Command(0)
-		d.Command(uint8(d.width - 1))
+		d.Command(d.resetCol[0])
+		d.Command(d.resetCol[1])
 		d.Command(PAGEADDR)
-		d.Command(0)
-		d.Command(uint8(d.height/8) - 1)
+		d.Command(d.resetPage[0])
+		d.Command(d.resetPage[1])
 	}
 
 	return d.Tx(d.buffer, false)
@@ -223,8 +252,7 @@ func (d *Device) GetPixel(x int16, y int16) bool {
 // SetBuffer changes the whole buffer at once
 func (d *Device) SetBuffer(buffer []byte) error {
 	if int16(len(buffer)) != d.bufferSize {
-		//return ErrBuffer
-		return errors.New("wrong size buffer")
+		return errBufferSize
 	}
 	for i := int16(0); i < d.bufferSize; i++ {
 		d.buffer[i] = buffer[i]
@@ -315,4 +343,43 @@ func (b *SPIBus) tx(data []byte, isCommand bool) error {
 // Size returns the current size of the display.
 func (d *Device) Size() (w, h int16) {
 	return d.width, d.height
+}
+
+// DrawBitmap copies the bitmap to the screen at the given coordinates.
+func (d *Device) DrawBitmap(x, y int16, bitmap pixel.Image[pixel.Monochrome]) error {
+	width, height := bitmap.Size()
+	if x < 0 || x+int16(width) > d.width || y < 0 || y+int16(height) > d.height {
+		return errOutOfRange
+	}
+
+	for i := 0; i < width; i++ {
+		for j := 0; j < height; j++ {
+			d.SetPixel(x+int16(i), y+int16(j), bitmap.Get(i, j).RGBA())
+		}
+	}
+
+	return nil
+}
+
+// Rotation returns the currently configured rotation.
+func (d *Device) Rotation() drivers.Rotation {
+	return drivers.Rotation0
+}
+
+// SetRotation changes the rotation of the device (clock-wise).
+// Would have to be implemented in software for this device.
+func (d *Device) SetRotation(rotation drivers.Rotation) error {
+	return errNotImplemented
+}
+
+// Set the sleep mode for this display. When sleeping, the panel uses a lot
+// less power. The display won't show an image anymore, but the memory contents
+// should be kept.
+func (d *Device) Sleep(sleepEnabled bool) error {
+	if sleepEnabled {
+		d.Command(DISPLAYOFF)
+	} else {
+		d.Command(DISPLAYON)
+	}
+	return nil
 }
